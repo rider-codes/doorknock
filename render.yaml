@@ -1,0 +1,21 @@
+# Render blueprint: New + > Blueprint, pick this repo and the `byok` branch.
+# The free plan sleeps when idle and forgets files on restart, which is fine for a demo:
+# visitors' workspaces are temporary anyway. For workspaces that survive restarts, use a paid plan and uncomment the disk.
+services:
+  - type: web
+    name: doorknock
+    runtime: docker
+    branch: byok
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PUBLIC_MODE
+        value: "1"
+      - key: WORKSPACE_DAYS
+        value: "7"
+      - key: MAX_WORKSPACES
+        value: "300"
+    # disk:
+    #   name: workspaces
+    #   mountPath: /data
+    #   sizeGB: 1
