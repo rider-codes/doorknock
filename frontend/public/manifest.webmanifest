@@ -1,0 +1,10 @@
+{
+  "name": "Doorknock",
+  "short_name": "Doorknock",
+  "description": "Find the right person. Knock with a real reason.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F5F2",
+  "theme_color": "#F4F5F2",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
