@@ -1,3 +1,4 @@
+import { GithubButton } from "./components/GithubButton";
 import { useState } from "react";
 import { Demo } from "./components/Demo";
 import { FlowDiagram, type StepKey } from "./components/FlowDiagram";
@@ -21,7 +22,8 @@ export default function Landing() {
           <span className="logo"><Logo /></span>Doorknock
         </Link>
         <span className="spacer" />
-        <Link to="/app" className="btn small">Open workspace</Link>
+        <GithubButton />
+        <Link to="/app" className="btn small">Try it yourself</Link>
       </header>
 
       <main className="main">
@@ -33,7 +35,7 @@ export default function Landing() {
               in your Gmail. Nothing sends without you.
             </p>
             <div className="row" style={{ marginTop: 16 }}>
-              <Link to="/app" className="btn">Open the workspace</Link>
+              <Link to="/app" className="btn">Try it yourself</Link>
               <a href="#example" className="btn ghost">See how it works</a>
             </div>
           </div>

@@ -1,4 +1,5 @@
 """Settings, read from the environment on every call so tests can override them."""
+import contextvars
 import os
 from pathlib import Path
 
@@ -59,12 +60,68 @@ OPENROUTER_DEFAULTS = {
 }
 
 
+# ---- public site ------------------------------------------------------------------
+# On a public site every visitor brings their own AI key (kept in their browser, sent with each request, never stored),
+# and nothing of the owner's is used: not their keys, Gmail, people lookups or paid job feeds.
+_visitor_keys: contextvars.ContextVar[dict] = contextvars.ContextVar("visitor_keys", default={})
+
+
+def public_mode() -> bool:
+    return env("PUBLIC_MODE").lower() in ("1", "true", "yes", "on")
+
+
+def use_visitor_keys(keys: dict):
+    return _visitor_keys.set(keys)
+
+
+def release_visitor_keys(token) -> None:
+    _visitor_keys.reset(token)
+
+
+def github_url() -> str:
+    return env("GITHUB_URL")
+
+
+PUBLIC_DEFAULTS = {  # free models, so a visitor with a free OpenRouter key can use every step
+    "PARSE": "nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-31b-it:free,openrouter/free",
+    "BRIEF": "google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,openrouter/free",
+    "SCORE": "nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-31b-it:free,apodex/apodex-1.1-mini:free,openrouter/free",
+    "DRAFT": "google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,openrouter/free",
+    "PEOPLE": "nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-31b-it:free,openrouter/free",
+}
+
+
 def openrouter_key() -> str:
+    if public_mode():
+        return _visitor_keys.get().get("openrouter", "")
     return env("OPENROUTER_API_KEY")
 
 
 def anthropic_key() -> str:
-    return env("ANTHROPIC_API_KEY")
+    return "" if public_mode() else env("ANTHROPIC_API_KEY")
+
+
+# Optional keys a visitor can bring. On the public site only theirs count; on your own machine, the ones in .env.
+def hunter_key() -> str:
+    return _visitor_keys.get().get("hunter", "") if public_mode() else env("HUNTER_API_KEY")
+
+
+def jooble_key() -> str:
+    return _visitor_keys.get().get("jooble", "") if public_mode() else env("JOOBLE_API_KEY")
+
+
+def adzuna_keys() -> tuple[str, str]:
+    if public_mode():
+        keys = _visitor_keys.get()
+        return keys.get("adzuna_id", ""), keys.get("adzuna_key", "")
+    return env("ADZUNA_APP_ID"), env("ADZUNA_APP_KEY")
+
+
+def key_id(key: str) -> str:
+    """A short, non-reversible label for a key, so budgets and caches can be kept per key without storing the key."""
+    import hashlib
+
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
 def llm_ready() -> bool:
@@ -77,6 +134,8 @@ def model_chain(purpose: str) -> list[str]:
     override = env(f"MODEL_{key}") or env("MODEL_DEFAULT")
     if override:
         return [m.strip() for m in override.split(",") if m.strip()]
+    if public_mode():
+        return [m.strip() for m in PUBLIC_DEFAULTS.get(key, PUBLIC_DEFAULTS["BRIEF"]).split(",")]
     if openrouter_key():
         return [m.strip() for m in OPENROUTER_DEFAULTS.get(key, OPENROUTER_DEFAULTS["BRIEF"]).split(",")]
     return [anthropic_model()]
@@ -88,12 +147,14 @@ def uses_openrouter(model: str) -> bool:
 
 # ---- Jev (relevance gate) ---------------------------------------------------------
 def typesafe_key() -> str:
-    return env("TYPESAFE_API_KEY")
+    return "" if public_mode() else env("TYPESAFE_API_KEY")
 
 
 def jev_backend() -> tuple[str, str, str, str] | None:
     """Where to call Jev: (name, endpoint, api key, default model). OpenRouter first, since its one key also covers the
     other models and there is no separate account; otherwise TypeSafe directly. None if neither key is set."""
+    if public_mode():
+        return None  # the relevance filter is a paid model; a visitor's free key would only get refusals
     choice = env("JEV_PROVIDER", "auto").lower()
     if choice in ("auto", "openrouter") and openrouter_key():
         return "openrouter", "https://openrouter.ai/api/v1/systemone", openrouter_key(), "~typesafe/jev-latest"

@@ -1,4 +1,6 @@
 import { Allowances } from "./components/Allowances";
+import { GithubButton } from "./components/GithubButton";
+import { PublicBar } from "./components/PublicBar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { AppState } from "./types";
@@ -81,11 +83,13 @@ export default function App() {
           <span className="logo"><Logo /></span>Doorknock
         </Link>
         <span className="spacer" />
+        <GithubButton />
         <Link to="/" className="btn ghost small">How it works</Link>
       </header>
 
       <main className="main">
         {fatal && <div className="notice bad">{fatal}</div>}
+        {state.setup.public && <PublicBar ctx={ctx} />}
 
         <section className="workspace" aria-label="Workspace">
           <div className="ws-bar">

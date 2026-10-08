@@ -1,8 +1,10 @@
-﻿from contextlib import asynccontextmanager
+import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+import httpx
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import config, llm, pipeline, refresh, store, usage
+from . import config, db, demo, llm, pipeline, refresh, store, usage
 from .db import get_session, init_db, session_scope
 from .models import Company, Draft, Job, LlmCall, Person, Run, Score
 from .schemas import BriefData, ProfileData
@@ -19,6 +21,11 @@ from .services import brief_agent, gmail, jev, outreach, people, resume_parser, 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if config.public_mode():
+        db.prune_workspaces(int(config.env("WORKSPACE_DAYS", "7")))  # visitors' data is kept a week, then removed
+        refresh.start()
+        yield
+        return
     init_db()
     with session_scope() as s:
         store.seed_companies(s)
@@ -37,6 +44,51 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_KEY_SHAPE = re.compile(r"^sk-or-[A-Za-z0-9_\-]{10,200}$")
+_HUNTER_SHAPE = re.compile(r"^[a-f0-9]{40}$")
+_JOOBLE_SHAPE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+_ADZUNA_SHAPE = re.compile(r"^([a-f0-9]{8}):([a-f0-9]{32})$")
+
+
+def _visitor_keys_from(headers) -> dict:
+    """The optional keys a visitor sent, kept only if they look right. They live for this request (or the search it starts)."""
+    keys: dict = {}
+    if _KEY_SHAPE.match(headers.get("x-openrouter-key", "").strip()):
+        keys["openrouter"] = headers["x-openrouter-key"].strip()
+    if _HUNTER_SHAPE.match(headers.get("x-hunter-key", "").strip()):
+        keys["hunter"] = headers["x-hunter-key"].strip()
+    if _JOOBLE_SHAPE.match(headers.get("x-jooble-key", "").strip()):
+        keys["jooble"] = headers["x-jooble-key"].strip()
+    m = _ADZUNA_SHAPE.match(headers.get("x-adzuna-key", "").strip())
+    if m:
+        keys["adzuna_id"], keys["adzuna_key"] = m.group(1), m.group(2)
+    return keys
+
+
+@app.middleware("http")
+async def workspace_middleware(request: Request, call_next):
+    """On a public site every visitor has a private workspace, named by the id their browser sends, and brings their own key.
+    Neither is stored: the id picks a database file, and the key is held only while the request (or its search) runs."""
+    if not config.public_mode() or not request.url.path.startswith("/api/"):
+        return await call_next(request)
+    wid = request.headers.get("x-workspace", "")
+    if not db.valid_id(wid):
+        return JSONResponse(status_code=400, content={"detail": "Missing or invalid workspace id. Reload the page."})
+    new = not db.exists(wid)
+    if new and db.workspace_count() >= int(config.env("MAX_WORKSPACES", "300")):
+        return JSONResponse(status_code=503, content={"detail": "The site is full right now. Try later, or run Doorknock yourself (see GitHub)."})
+    workspace_token = db.use(wid)
+    key_token = config.use_visitor_keys(_visitor_keys_from(request.headers))
+    try:
+        if new:
+            with session_scope() as s:
+                store.seed_companies(s)
+        return await call_next(request)
+    finally:
+        config.release_visitor_keys(key_token)
+        db.release(workspace_token)
 
 
 async def _upstream_error(_, exc: Exception):
@@ -137,12 +189,18 @@ def get_state(s: Session = Depends(get_session)):
             "llm": config.llm_ready(),
             "jev": jev.configured(),
             "people_provider": people.provider_name(),
-            "aggregator": bool(config.env("ADZUNA_APP_ID") and config.env("ADZUNA_APP_KEY")) or bool(config.env("JOOBLE_API_KEY")),
-            "gmail_client_secret": gmail.has_client_secret(),
-            "gmail_connected": gmail.is_connected(),
+            "aggregator": bool(all(config.adzuna_keys())) or bool(config.jooble_key()),
+            "keys": {"openrouter": bool(config.openrouter_key()), "hunter": bool(config.hunter_key()),
+                     "jooble": bool(config.jooble_key()), "adzuna": bool(all(config.adzuna_keys()))},
+            "gmail_client_secret": False if config.public_mode() else gmail.has_client_secret(),
+            "gmail_connected": False if config.public_mode() else gmail.is_connected(),
+            "public": config.public_mode(),
+            "github_url": config.github_url(),
         },
+        "demo": demo.is_demo(s),
+        "workspace_days": int(config.env("WORKSPACE_DAYS", "7")) if config.public_mode() else 0,
         "allowances": _allowances(s, run),
-        "freshness": {"last_refreshed": (lambda t: t.isoformat() if t else None)(refresh.last_refreshed(s)), "auto_hours": refresh.hours()},
+        "freshness": {"last_refreshed": (lambda t: t.isoformat() if t else None)(refresh.last_refreshed(s)), "auto_hours": 0 if config.public_mode() else refresh.hours()},
         "run": _run_dict(run),
     }
 
@@ -155,8 +213,8 @@ def _allowances(s: Session, run: Run | None) -> list[dict]:
         if q:
             out.append({"key": "hunter", "label": "Contact tokens", "detail": "1 per Find contacts", "left": max(0, q["available"] - q["used"]),
                         "limit": q["available"], "unit": "tokens", "period": "this month"})
-    if config.env("JOOBLE_API_KEY"):
-        _, spent = usage.used("jooble")
+    if config.jooble_key():  # on a public site this is the visitor's own key, with its own count
+        _, spent = usage.used(f"jooble-{config.key_id(config.jooble_key())}" if config.public_mode() else "jooble")
         cap = int(config.env("JOOBLE_TOTAL_LIMIT", "480"))
         out.append({"key": "jooble", "label": "Jooble job feed", "detail": "key allows 500 requests in all", "left": max(0, cap - spent),
                     "limit": cap, "unit": "requests", "period": "in total"})
@@ -238,6 +296,63 @@ def edit_brief(body: BriefBody, s: Session = Depends(get_session)):
         raise HTTPException(422, str(exc)) from exc
     saved = store.save_brief(s, data, store.latest_brief(s).history)
     return {"version": saved.version, "data": saved.data, "history": saved.history}
+
+
+# ---- sample data, your key, your data --------------------------------------------
+@app.post("/api/demo")
+def load_demo(s: Session = Depends(get_session)):
+    """Fill this workspace with a made-up candidate, jobs, contacts and a draft, so every screen has something to show."""
+    demo.seed(s)
+    return {"ok": True}
+
+
+@app.delete("/api/demo")
+def clear_demo(s: Session = Depends(get_session)):
+    demo.wipe(s)
+    return {"ok": True}
+
+
+@app.delete("/api/workspace")
+def delete_my_workspace():
+    """Remove everything this visitor stored: resume, brief, jobs, drafts."""
+    if not config.public_mode():
+        raise HTTPException(403, "Only available on the public site.")
+    db.delete_workspace(db.current())
+    return {"ok": True}
+
+
+@app.post("/api/key/check")
+def check_key(service: str = "openrouter"):
+    """Ask a service about the visitor's key (free to ask) so the page can say whether it works."""
+    if service == "hunter":
+        key = config.hunter_key()
+        if not key:
+            raise HTTPException(400, "No Hunter key was sent, or it is not in Hunter's format (40 letters and numbers).")
+        try:
+            resp = httpx.get("https://api.hunter.io/v2/account", params={"api_key": key}, timeout=15)
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "Could not reach Hunter to check the key.") from exc
+        if resp.status_code in (401, 403):
+            raise HTTPException(401, "Hunter does not accept that key.")
+        searches = (((resp.json().get("data") or {}).get("requests") or {}).get("searches") or {}) if resp.status_code == 200 else {}
+        left = max(0, int(searches.get("available", 0)) - int(searches.get("used", 0)))
+        return {"ok": True, "detail": f"{left} contact searches left this month"}
+    if service in ("jooble", "adzuna"):  # these cannot be checked without spending a request, so only the format is checked
+        ok = bool(config.jooble_key()) if service == "jooble" else bool(all(config.adzuna_keys()))
+        if not ok:
+            raise HTTPException(400, "That key is not in the expected format.")
+        return {"ok": True, "detail": "saved in this browser"}
+    key = config.openrouter_key()
+    if not key:
+        raise HTTPException(400, "No key was sent.")
+    try:
+        resp = httpx.get("https://openrouter.ai/api/v1/key", headers={"Authorization": f"Bearer {key}"}, timeout=15)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Could not reach OpenRouter to check the key.") from exc
+    if resp.status_code in (401, 403):
+        raise HTTPException(401, "OpenRouter does not accept that key.")
+    data = (resp.json().get("data") or {}) if resp.status_code == 200 else {}
+    return {"ok": True, "free_tier": bool(data.get("is_free_tier", True))}
 
 
 # ---- companies ----------------------------------------------------------------
@@ -480,14 +595,21 @@ def edit_draft(draft_id: int, body: DraftEdit, s: Session = Depends(get_session)
     return draft_dict(draft, person.email if person else "")
 
 
+def _no_gmail_here() -> None:
+    if config.public_mode():
+        raise HTTPException(403, "Saving to Gmail is switched off on the public site. Copy the draft, or run Doorknock yourself (see GitHub).")
+
+
 @app.post("/api/gmail/connect")
 def gmail_connect():
+    _no_gmail_here()
     gmail.connect()  # blocks until the user finishes the Google consent screen
     return {"connected": gmail.is_connected()}
 
 
 @app.post("/api/drafts/{draft_id}/gmail")
 def save_to_gmail(draft_id: int, s: Session = Depends(get_session)):
+    _no_gmail_here()
     draft = s.get(Draft, draft_id)
     if not draft:
         raise HTTPException(404, "No such draft.")

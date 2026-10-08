@@ -88,31 +88,35 @@ def rank(people: list[RawPerson], job_title: str, limit: int = 6) -> list[dict]:
 
 # ---- providers ----------------------------------------------------------------
 HUNTER_RESERVE = 2  # searches always left unspent
-_quota_cache: dict = {"at": 0.0, "value": None}
+_quota_cache: dict[str, dict] = {}  # per key: on a public site every visitor has their own allowance
 
 
 def hunter_quota() -> dict | None:
     """{'used', 'available'} searches this month, read from Hunter (free to ask) and remembered for a few minutes."""
     import time
 
-    if config.env("HUNTER_API_KEY") == "":
+    key = config.hunter_key()
+    if not key:
         return None
-    if time.time() - _quota_cache["at"] < 300:
-        return _quota_cache["value"]
+    slot = _quota_cache.setdefault(config.key_id(key), {"at": 0.0, "value": None})
+    if time.time() - slot["at"] < 300:
+        return slot["value"]
     value = None
     try:
-        resp = httpx.get("https://api.hunter.io/v2/account", params={"api_key": config.env("HUNTER_API_KEY")}, timeout=5)
+        resp = httpx.get("https://api.hunter.io/v2/account", params={"api_key": key}, timeout=5)
         if resp.status_code == 200:
             searches = ((resp.json().get("data") or {}).get("requests") or {}).get("searches") or {}
             value = {"used": int(searches.get("used", 0)), "available": int(searches.get("available", 0))}
     except (httpx.HTTPError, ValueError):
         pass
-    _quota_cache.update(at=time.time() if value else time.time() - 240, value=value)  # a failed look is retried in about a minute
+    slot.update(at=time.time() if value else time.time() - 240, value=value)  # a failed look is retried in about a minute
     return value
 
 
 def invalidate_quota() -> None:
-    _quota_cache["at"] = 0.0
+    slot = _quota_cache.get(config.key_id(config.hunter_key()))
+    if slot:
+        slot["at"] = 0.0
 
 
 def _hunter_check_quota(key: str) -> None:
@@ -129,9 +133,9 @@ def _hunter_check_quota(key: str) -> None:
 
 
 def _hunter(domain: str) -> list[RawPerson]:
-    key = config.env("HUNTER_API_KEY")
+    key = config.hunter_key()
     if not key:
-        raise PeopleError("HUNTER_API_KEY is not set. Add it to backend/.env.")
+        raise PeopleError("Add your Hunter key above to search for emails." if config.public_mode() else "HUNTER_API_KEY is not set. Add it to backend/.env.")
     _hunter_check_quota(key)
     resp = httpx.get(
         "https://api.hunter.io/v2/domain-search",
@@ -214,7 +218,7 @@ def _slug(part: str) -> str:
 
 
 def _hunter_finder(domain: str, first: str, last: str) -> tuple[str, str] | None:
-    key = config.env("HUNTER_API_KEY")
+    key = config.hunter_key()
     if not key:
         return None
     try:
@@ -268,6 +272,8 @@ def add_manual(name: str, title: str, email: str, domain: str, job_title: str) -
 
 
 def provider_name() -> str:
+    if config.public_mode():
+        return "hunter" if config.hunter_key() else "none"  # only if the visitor brought a key
     return config.people_provider()
 
 

@@ -91,3 +91,25 @@ Covers the filters, score maths, people ranking, source parsers, the quote verif
 - Single user, local SQLite, no sign-in by design.
 
 
+
+## This branch: the public, bring-your-own-key version
+
+The `byok` branch is the same app with a switch (`PUBLIC_MODE=1`) that makes it safe to put on a public site. With the switch off it behaves exactly like `main`.
+
+With it on:
+
+- **Private workspaces.** Every browser gets its own database, named by a random id the browser sends. Nobody sees anyone else's resume, jobs or drafts. Workspaces are deleted after `WORKSPACE_DAYS` (default 7), and a visitor can delete theirs at any time.
+- **Visitors bring their own keys.** OpenRouter (for the AI steps), and optionally Hunter (contact search), Jooble and Adzuna (more job feeds). Each key stays in the visitor's browser, is sent only with their own requests, and is never stored on the server. The owner's keys in `.env` are ignored.
+- **Sample data.** One click loads a made-up candidate with scored jobs, contacts and a draft. Searches on sample data finish in seconds and read nothing from the internet.
+- **Switched off for visitors:** saving to Gmail, the automatic refresh, reading job portals (Internshala, Unstop and the like), and the paid relevance filter.
+- **Limits.** One real search every `PUBLIC_RUN_COOLDOWN_SECONDS` (default 300) per visitor, and at most `MAX_WORKSPACES` (default 300) workspaces. Job boards are read once and shared for 30 minutes.
+
+Run it:
+
+```bash
+cd frontend && npm install && npm run build     # builds the page the backend serves
+cd ../backend && pip install -r requirements.txt
+PUBLIC_MODE=1 uvicorn app.main:app --host 0.0.0.0 --port 8100
+```
+
+It needs a host that runs Python and keeps files (the workspaces are SQLite files under `backend/data/workspaces`). Set `VITE_GITHUB_URL` at build time to point the GitHub button at your fork.

@@ -2,10 +2,43 @@ import type { AppState, Brief, Company, Draft, JobDetail, JobSummary, JobView, P
 
 export class ApiError extends Error {}
 
+const store = (): Storage | null => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null; // private windows can refuse storage
+  }
+};
+
+/** A random id that names this browser's private workspace on the public site. */
+export function workspaceId(): string {
+  const s = store();
+  let id = s?.getItem("doorknock.workspace") ?? "";
+  if (!/^[a-f0-9]{32}$/.test(id)) {
+    id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+    s?.setItem("doorknock.workspace", id);
+  }
+  return id;
+}
+
+/** The optional keys a visitor can bring. Each lives only in this browser and is sent with that visitor's own requests. */
+export type KeyService = "openrouter" | "hunter" | "jooble" | "adzuna";
+const KEY_HEADER: Record<KeyService, string> = { openrouter: "X-OpenRouter-Key", hunter: "X-Hunter-Key", jooble: "X-Jooble-Key", adzuna: "X-Adzuna-Key" };
+const slot = (s: KeyService) => (s === "openrouter" ? "doorknock.key" : `doorknock.key.${s}`);
+export const getKeyFor = (s: KeyService): string => store()?.getItem(slot(s)) ?? "";
+export const setKeyFor = (s: KeyService, key: string) => store()?.setItem(slot(s), key.trim());
+export const clearKeyFor = (s: KeyService) => store()?.removeItem(slot(s));
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, init);
+    const headers = new Headers(init?.headers);
+    headers.set("X-Workspace", workspaceId());
+    for (const service of Object.keys(KEY_HEADER) as KeyService[]) {
+      const key = getKeyFor(service);
+      if (key) headers.set(KEY_HEADER[service], key);
+    }
+    res = await fetch(path, { ...init, headers });
   } catch {
     throw new ApiError("Cannot reach the Doorknock server. Is the backend running on port 8000?");
   }
@@ -31,6 +64,11 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 export const api = {
   state: () => request<AppState>("/api/state"),
+  loadDemo: () => request("/api/demo", { method: "POST" }),
+  clearDemo: () => request("/api/demo", { method: "DELETE" }),
+  deleteWorkspace: () => request("/api/workspace", { method: "DELETE" }),
+  checkKey: (service: KeyService = "openrouter") =>
+    request<{ ok: boolean; free_tier?: boolean; detail?: string }>(`/api/key/check?service=${service}`, { method: "POST" }),
   uploadResume: (file: File) => {
     const form = new FormData();
     form.append("file", file);

@@ -1,4 +1,4 @@
-﻿"""Stages: fetch -> filter -> hydrate -> rank -> relevance -> score. Each stage is idempotent and re-runnable on its own."""
+"""Stages: fetch -> filter -> hydrate -> rank -> relevance -> score. Each stage is idempotent and re-runnable on its own."""
 import logging
 import os
 import re
@@ -9,14 +9,21 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import config, llm, store, usage
+from . import config, db, demo, llm, store, usage
 from .db import session_scope
 from .models import Company, Draft, Job, Run, Score
 from .services import filters, jev, portals, ranker, scorer, sources
 
 log = logging.getLogger("doorknock.pipeline")
 STAGES = ["fetch", "filter", "hydrate", "rank", "relevance", "score"]
-_lock = threading.Lock()
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(workspace: str) -> threading.Lock:
+    """One search at a time per workspace (on a public site, visitors do not block each other)."""
+    with _locks_guard:
+        return _locks.setdefault(workspace, threading.Lock())
 
 
 def _now() -> datetime:
@@ -71,7 +78,7 @@ def fetch_stage(s: Session, progress) -> dict:
             return c.id, None, f"{type(exc).__name__}: {exc}"[:200]
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for cid, jobs, err in pool.map(work, companies):
+        for cid, jobs, err in pool.map(db.in_context(work), companies):
             results[cid] = (jobs, err)
     found = new = 0
     errors = []
@@ -138,7 +145,9 @@ _NCR_PLACES = ["Noida", "Delhi", "Gurgaon"]
 
 def _aggregator(s: Session, hints: dict, brief: dict, profile) -> tuple[int, int, str]:
     """Jobs from aggregators (Adzuna, Jooble), filed under the employer that posted each one. Each is skipped without its key."""
-    adz_id, adz_key, jooble_key = config.env("ADZUNA_APP_ID"), config.env("ADZUNA_APP_KEY"), config.env("JOOBLE_API_KEY")
+    (adz_id, adz_key), jooble_key = config.adzuna_keys(), config.jooble_key()
+    if config.public_mode() and not (jooble_key or (adz_id and adz_key)):
+        return 0, 0, ""  # a visitor with no feed key of their own gets employer boards only
     cities = [c for c in brief.get("cities", []) if c.strip()]
     places = []
     for c in cities:
@@ -153,15 +162,18 @@ def _aggregator(s: Session, hints: dict, brief: dict, profile) -> tuple[int, int
             problems.append(f"Adzuna: {type(exc).__name__}: {exc}"[:200])
     if jooble_key:
         daily, total = int(config.env("JOOBLE_DAILY_REQUESTS", "40")), int(config.env("JOOBLE_TOTAL_LIMIT", "480"))
+        budget = f"jooble-{config.key_id(jooble_key)}" if config.public_mode() else "jooble"  # one budget per key
         try:
             raw += sources.fetch_jooble(
                 jooble_key, queries[:3], (brief.get("countries") or ["India"])[0], 2,
-                allow=lambda: usage.allow("jooble", daily, total), spend=lambda: usage.spend("jooble"),
+                allow=lambda: usage.allow(budget, daily, total), spend=lambda: usage.spend(budget),
             )
         except Exception as exc:
             problems.append(f"Jooble: {type(exc).__name__}: {exc}"[:200])
     configured = os.environ.get("PORTAL_SOURCES")  # an empty value means "none", unlike an unset one
     portals_on = {p.strip() for p in (portals.DEFAULT_ON if configured is None else configured).split(",") if p.strip()}
+    if config.public_mode():
+        portals_on = set()  # reading job portals is done from the owner's own machine, never on behalf of visitors
     if portals_on:
         jobs, issues = portals.fetch_all(list(dict.fromkeys(places)), queries, portals_on)
         raw += jobs
@@ -243,7 +255,7 @@ def hydrate_stage(s: Session, progress) -> dict:
     done = failed = 0
     s.commit()  # release the write lock before the slow network phase
     with ThreadPoolExecutor(max_workers=6) as pool:
-        for jid, data, err in pool.map(fetch_one, work_items):
+        for jid, data, err in pool.map(db.in_context(fetch_one), work_items):
             job = by_id[jid]
             if data is None:
                 failed += 1
@@ -318,7 +330,7 @@ def relevance_stage(s: Session, progress) -> dict:
     fatal: Exception | None = None
     s.commit()  # release the write lock before the slow network phase
     with ThreadPoolExecutor(max_workers=12) as pool:
-        for jid, result, err in pool.map(work, items):
+        for jid, result, err in pool.map(db.in_context(work), items):
             if err is not None:
                 failed += 1
                 if isinstance(err, (jev.JevAuthError, jev.JevCreditError)):
@@ -384,7 +396,7 @@ def score_stage(s: Session, progress, limit: int = 25) -> dict:
     by_id = {j.id: j for j in todo}
     s.commit()  # release the write lock: the worker threads below write their own AI-usage rows
     with ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(work, payloads))  # finish all the slow calls first, then write every result in one go
+        results = list(pool.map(db.in_context(work), payloads))  # finish all the slow calls first, then write every result in one go
     model = config.model_chain("score")[0]
     for jid, result, err in results:
         if result is None:
@@ -408,15 +420,38 @@ def score_stage(s: Session, progress, limit: int = 25) -> dict:
 
 
 # ---- orchestration ------------------------------------------------------------
+def _check_cooldown() -> None:
+    """On a public site a visitor cannot start searches back to back: every search reads many job boards."""
+    if not config.public_mode():
+        return
+    wait = int(config.env("PUBLIC_RUN_COOLDOWN_SECONDS", "300"))
+    with session_scope() as s:
+        last = s.execute(select(Run).order_by(Run.id.desc()).limit(1)).scalar_one_or_none()
+    if last and last.started_at:
+        started = last.started_at if last.started_at.tzinfo else last.started_at.replace(tzinfo=timezone.utc)
+        left = wait - (datetime.now(timezone.utc) - started).total_seconds()
+        if left > 0:
+            raise RuntimeError(f"Please wait {int(left)} seconds before searching again.")
+
+
 def run_pipeline(stages: list[str], score_limit: int = 25) -> int:
     """Create the Run row and do the work on a background thread. Returns the run id."""
-    if not _lock.acquire(blocking=False):
+    lock = _lock_for(db.current())
+    if not lock.acquire(blocking=False):
         raise RuntimeError("A run is already in progress.")
-    with session_scope() as s:
-        run = Run(status="running", stage=stages[0], detail={})
-        s.add(run)
-        s.flush()
-        run_id = run.id
+    try:
+        with session_scope() as s:
+            sample = demo.is_demo(s)  # a sample workspace never reads the internet
+        if not sample:
+            _check_cooldown()
+        with session_scope() as s:
+            run = Run(status="running", stage=stages[0], detail={})
+            s.add(run)
+            s.flush()
+            run_id = run.id
+    except Exception:
+        lock.release()
+        raise
 
     def go():
         try:
@@ -429,7 +464,9 @@ def run_pipeline(stages: list[str], score_limit: int = 25) -> int:
                     def progress(**kw):
                         run.detail = {**(run.detail or {}), **kw}
 
-                    if stage == "fetch":
+                    if sample:
+                        demo.fake_stage(stage, s, progress, score_limit)
+                    elif stage == "fetch":
                         fetch_stage(s, progress)
                     elif stage == "filter":
                         filter_stage(s, progress)
@@ -452,8 +489,8 @@ def run_pipeline(stages: list[str], score_limit: int = 25) -> int:
                 run.status, run.finished_at = "error", _now()
                 run.detail = {**(run.detail or {}), "error": str(exc)[:300]}
         finally:
-            _lock.release()
+            lock.release()
 
-    threading.Thread(target=go, daemon=True, name=f"run-{run_id}").start()
+    threading.Thread(target=db.in_context(go), daemon=True, name=f"run-{run_id}").start()
     return run_id
 

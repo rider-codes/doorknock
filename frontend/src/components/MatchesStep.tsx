@@ -24,7 +24,7 @@ const STAGE_LABEL: Record<string, string> = {
 
 const SOURCE: Record<string, string> = {
   greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", smartrecruiters: "SmartRecruiters", workday: "Workday", workable: "Workable",
-  adzuna: "Adzuna", jooble: "Jooble", internshala: "Internshala", unstop: "Unstop", instahyre: "Instahyre", foundit: "Foundit", muse: "The Muse", remotive: "Remotive",
+  adzuna: "Adzuna", jooble: "Jooble", internshala: "Internshala", unstop: "Unstop", instahyre: "Instahyre", foundit: "Foundit", muse: "The Muse", remotive: "Remotive", demo: "sample data",
 };
 
 type Signals = NonNullable<JobSummary["signals"]>;
@@ -289,7 +289,7 @@ export function MatchesStep({ ctx }: { ctx: Ctx }) {
             : "Automatic refresh is off; press Refresh jobs."}
         </div>
       )}
-      {!state.setup.aggregator && (
+      {!state.setup.aggregator && !state.setup.public && (
         <div className="notice">
           Only employers' own job boards are being read. For local Indian employers too, add a free Adzuna key: set <code>ADZUNA_APP_ID</code> and{" "}
           <code>ADZUNA_APP_KEY</code> in <code>backend/.env</code> (see <code>.env.example</code>), then restart.

@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../api";
 import { Spinner } from "./Logo";
 import { message, type Ctx } from "./ctx";
@@ -47,9 +47,13 @@ export function ResumeStep({ ctx }: { ctx: Ctx }) {
       </div>
 
       {!state.setup.llm && (
-        <div className="notice bad">
-          No AI key found. Add <code>OPENROUTER_API_KEY</code> (one key, many models) or <code>ANTHROPIC_API_KEY</code> to{" "}
-          <code>backend/.env</code> and restart the backend, or reading your resume will fail.
+        <div className={state.setup.public ? "notice" : "notice bad"}>
+          {state.setup.public ? (
+            <>To read your own resume, add a free OpenRouter key first: press <b>Add my key</b> at the top. Just want to look around? Use <b>Explore with sample data</b> there instead.</>
+          ) : (
+            <>No AI key found. Add <code>OPENROUTER_API_KEY</code> (one key, many models) or <code>ANTHROPIC_API_KEY</code> to{" "}
+            <code>backend/.env</code> and restart the backend, or reading your resume will fail.</>
+          )}
         </div>
       )}
 

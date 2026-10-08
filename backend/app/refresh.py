@@ -69,7 +69,7 @@ def _loop() -> None:
 
 def start() -> None:
     global _started
-    if _started or hours() <= 0:
-        return
+    if _started or hours() <= 0 or config.public_mode():
+        return  # on a public site there is no single owner to keep fresh
     _started = True
     threading.Thread(target=_loop, daemon=True, name="auto-refresh").start()

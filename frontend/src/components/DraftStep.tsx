@@ -189,7 +189,9 @@ export function DraftStep({ ctx }: { ctx: Ctx }) {
                 </div>
               )}
 
-              {draft.in_gmail ? (
+              {setup.public ? (
+                <div className="notice">Saving to Gmail is switched off on this public site. Copy the email above and paste it into your own mail. To save drafts straight to Gmail, run Doorknock yourself (see the GitHub button).</div>
+              ) : draft.in_gmail ? (
                 <div className="notice good">Saved to your Gmail drafts. Open Gmail to review and send it yourself.</div>
               ) : !setup.gmail_connected ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

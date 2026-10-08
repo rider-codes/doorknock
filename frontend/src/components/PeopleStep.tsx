@@ -85,8 +85,12 @@ export function PeopleStep({ ctx }: { ctx: Ctx }) {
 
           {provider === "none" && (
             <div className="notice">
-              No people provider is set up, so Doorknock can only use contacts printed in the posting. Paste a name below, add{" "}
-              <code>PEOPLE_PROVIDER=hunter</code> and <code>HUNTER_API_KEY</code> to <code>backend/.env</code>, or use <code>PEOPLE_PROVIDER=mock</code> for fake contacts.
+              {state.setup.public ? (
+                <>No Hunter key yet, so Doorknock can only use contacts printed in the posting. Add your Hunter key under <b>Your keys</b> at the top of the page to search for emails, or paste a name below.</>
+              ) : (
+                <>No people provider is set up, so Doorknock can only use contacts printed in the posting. Paste a name below, add{" "}
+                <code>PEOPLE_PROVIDER=hunter</code> and <code>HUNTER_API_KEY</code> to <code>backend/.env</code>, or use <code>PEOPLE_PROVIDER=mock</code> for fake contacts.</>
+              )}
             </div>
           )}
           {provider === "mock" && <div className="notice">Mock provider: these contacts are fake and use undeliverable addresses.</div>}

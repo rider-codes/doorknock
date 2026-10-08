@@ -7,6 +7,16 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+_board_cache: dict = {}
+BOARD_CACHE_SECONDS = 1800
+
+
+def config_public() -> bool:
+    from .. import config
+
+    return config.public_mode()
+
+
 HEADERS = {"User-Agent": "Doorknock/0.1 (personal job search; reads public job boards)"}
 TIMEOUT = 20
 
@@ -402,7 +412,15 @@ def fetch(ats: str, slug: str, hints: dict | None = None) -> list[RawJob]:
     company with thousands of openings is searched for your roles and countries instead of read end to end."""
     if ats not in ADAPTERS:
         raise ValueError(f"Unknown job board type: {ats}")
-    return ADAPTERS[ats](slug, hints)
+    key = (ats, slug, repr(sorted((hints or {}).items())))
+    if config_public():
+        hit = _board_cache.get(key)
+        if hit and time.time() - hit[0] < BOARD_CACHE_SECONDS:
+            return hit[1]  # many visitors, one read of each board
+    jobs = ADAPTERS[ats](slug, hints)
+    if config_public():
+        _board_cache[key] = (time.time(), jobs)
+    return jobs
 
 
 def hydrate(ats: str, slug: str, ref: str) -> dict:

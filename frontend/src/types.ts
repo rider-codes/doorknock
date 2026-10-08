@@ -1,4 +1,4 @@
-﻿export type Seniority = "intern" | "entry" | "mid" | "senior" | "staff";
+export type Seniority = "intern" | "entry" | "mid" | "senior" | "staff";
 
 export interface Profile {
   name: string;
@@ -36,8 +36,10 @@ export interface AppState {
   profile: { filename: string; version: number; data: Profile } | null;
   brief: { version: number; data: Brief; history: { role: "user" | "assistant"; content: string }[] };
   counts: { found: number; filtered: number; waiting: number; scored: number; drafts: number };
-  setup: { llm: boolean; jev: boolean; people_provider: string; aggregator: boolean; gmail_client_secret: boolean; gmail_connected: boolean };
+  setup: { llm: boolean; jev: boolean; people_provider: string; aggregator: boolean; public: boolean; github_url: string; keys: { openrouter: boolean; hunter: boolean; jooble: boolean; adzuna: boolean }; gmail_client_secret: boolean; gmail_connected: boolean };
   freshness: { last_refreshed: string | null; auto_hours: number };
+  demo: boolean;
+  workspace_days: number;
   allowances: { key: string; label: string; detail: string; left: number; limit: number; unit: string; period: string }[];
   run: Run | null;
 }

@@ -111,9 +111,9 @@ def _call_openrouter(model, system, messages, schema, tool_name, max_tokens, pur
             time.sleep(2)  # free models are rate limited; one short wait, then move to the next model
             continue
         if resp.status_code in (401, 403):
-            raise LLMError("OpenRouter rejected the API key. Check OPENROUTER_API_KEY.")
+            raise LLMError("OpenRouter rejected your key. Check it in Settings." if config.public_mode() else "OpenRouter rejected the API key. Check OPENROUTER_API_KEY.")
         if resp.status_code == 402:
-            raise LLMError("OpenRouter says you are out of credit. Add credit, or pick free models in MODEL_* settings.")
+            raise LLMError("OpenRouter says your key is out of credit. Add credit, or use a free key." if config.public_mode() else "OpenRouter says you are out of credit. Add credit, or pick free models in MODEL_* settings.")
         if resp.status_code >= 400:
             last = f"HTTP {resp.status_code}"
             raise _Retryable(f"{model}: {last}")
@@ -167,7 +167,9 @@ def structured(
     chain = config.model_chain(purpose)
     if not config.llm_ready():
         raise LLMError(
-            "No AI key is set. Add OPENROUTER_API_KEY (one key, many models) or ANTHROPIC_API_KEY to backend/.env "
+            "Add your OpenRouter key in Settings first (a free key works), then try again."
+            if config.public_mode()
+            else "No AI key is set. Add OPENROUTER_API_KEY (one key, many models) or ANTHROPIC_API_KEY to backend/.env "
             "and restart the server."
         )
     if _tokens_used_today() >= config.daily_token_cap():
