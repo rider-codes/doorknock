@@ -2,6 +2,8 @@
 
 Find the right person. Knock with a real reason.
 
+**[Live demo → doorknock-1kn9.onrender.com](https://doorknock-1kn9.onrender.com)**: a public version where you explore with sample data (no key needed) or bring your own free OpenRouter key. It is on free hosting, so the first visit after a quiet spell can take about a minute to wake. Its code is on the [`byok` branch](https://github.com/rider-codes/doorknock/tree/byok).
+
 A personal job-search assistant for one user. Upload a resume, describe the job you want in a chat, and Doorknock:
 
 1. reads your resume into a structured profile,
