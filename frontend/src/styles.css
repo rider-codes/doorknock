@@ -1,4 +1,4 @@
-﻿/* Doorknock. Mobile-first: the base styles are the phone layout, wider screens add to them. */
+/* Doorknock. Mobile-first: the base styles are the phone layout, wider screens add to them. */
 :root {
   --bg: #f4f5f2;
   --bar: #fafaf8;
@@ -91,7 +91,7 @@ a { color: inherit; }
 .flow-caption { color: var(--muted); font-size: 15px; }
 
 /* ---- workspace ---- */
-.workspace { border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); overflow: hidden; }
+.workspace { border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); overflow: clip; }
 .ws-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel2); }
 .ws-bar .t { font: 500 11px var(--mono); letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; flex: 1; }
 .traffic span { display: inline-block; width: 10px; height: 10px; border-radius: 99px; background: var(--line); margin-right: 6px; }
@@ -616,4 +616,26 @@ div.dg-card:hover { border-color: var(--line2); }
 @media (min-width: 900px) {
   .allow.rail { display: flex; }
   .allow.strip { display: none; }
+}
+
+/* landing example: the same match rows as the workspace */
+.drow { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-left: 4px solid var(--line2); border-radius: 0 10px 10px 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.drow.strong { border-left-color: var(--acc); }
+.drow.good { border-left-color: color-mix(in srgb, var(--acc) 55%, var(--line2)); }
+.drow.on { background: var(--panel2); }
+.drow:hover { background: var(--panel2); }
+.drow .t { font-weight: 600; font-size: 15px; line-height: 1.25; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; }
+.drow .s { margin-top: 3px; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); overflow-wrap: anywhere; }
+.drow .meta { min-width: 0; flex: 1; }
+.dhead { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.dhead h3 { margin-top: 4px; }
+.dfit { display: flex; align-items: center; gap: 8px; flex: none; }
+.dfit .vbadge { white-space: nowrap; }
+.demo-pane .bd { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.picked .mring { flex: none; }
+
+/* the step list sits below the sticky header and stays in view; it must never paint over it */
+@media (min-width: 900px) {
+  .stepper { position: sticky; top: 76px; align-self: flex-start; z-index: 1; border-right: 0; max-height: calc(100vh - 92px); overflow-y: auto; }
+  .stage { border-left: 1px solid var(--line); }
 }

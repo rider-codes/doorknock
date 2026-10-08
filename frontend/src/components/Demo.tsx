@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { FlowCaption, type StepKey } from "./FlowDiagram";
+import { Ring, TONE_LABEL, tone } from "./Score";
 
 /** Fixed sample data. The overview never calls the API, so anyone can click through it. */
 type Band = "All" | "Strong fit" | "Good fit" | "Stretch";
@@ -241,13 +242,12 @@ export function Demo({
       </div>
       <div className="jobs found-list" ref={listRef}>
         {visible.map((j) => (
-          <button key={j.id} type="button" className={"job" + (j.id === job.id ? " on" : "")} aria-pressed={j.id === job.id} onClick={() => { stop(); setJobId(j.id); setPersonIx(0); setEv(0); setSaved(false); setPicking(false); }}>
-            <span className={"score" + (total(j) >= 80 ? " hi" : "")}>{total(j)}</span>
+          <button key={j.id} type="button" className={"drow " + tone(total(j)) + (j.id === job.id ? " on" : "")} aria-pressed={j.id === job.id} onClick={() => { stop(); setJobId(j.id); setPersonIx(0); setEv(0); setSaved(false); setPicking(false); }}>
+            <Ring score={total(j)} size={44} />
             <span className="meta">
-              <div className="t">{j.title}</div>
+              <div className="t">{j.title}<span className={"vbadge " + tone(total(j))}>{TONE_LABEL[tone(total(j))]}</span></div>
               <div className="s">{j.company} · {j.where}</div>
             </span>
-            <span className="badge mute src-badge">{bandOf(total(j))}</span>
           </button>
         ))}
       </div>
@@ -256,26 +256,29 @@ export function Demo({
 
   const scorePane = job && (
     <div className="demo-pane">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "nowrap" }}>
+      <div className="dhead">
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: "var(--muted)", fontSize: 14 }}>{job.company} · {job.where} · {job.pay} · {job.posted}</div>
-          <h3 style={{ marginTop: 4 }}>{job.title}</h3>
+          <div className="mrow-meta"><span>{job.company}</span><span>{job.where}</span><span>{job.pay}</span><span>Posted {job.posted}</span></div>
+          <h3>{job.title}</h3>
         </div>
-        <div className="ring" style={{ background: `conic-gradient(var(--acc) ${score}%, var(--line) 0)` }} role="img" aria-label={`Fit score ${score} out of 100, ${bandOf(score)}`}>
-          <div><div className="mono-label" style={{ fontSize: 10 }}>FIT</div><div className="num">{score}</div></div>
+        <div className="dfit">
+          <Ring score={score} size={72} />
+          <span className={"vbadge " + tone(score)}>{TONE_LABEL[tone(score)]} fit</span>
         </div>
       </div>
-      <div className="sig-grid">
+      <div className="bd">
+        <div className="bd-head"><span className="mono-label">Why it scored {score}</span><span className="mono-label">{score} / 100</span></div>
         {SIGNAL_LABELS.map((label, i) => (
-          <div className="sig" key={label}>
-            <div className="name">{label}</div>
-            <div className="track"><div className="fill" style={{ width: `${(job.score[i] / MAX[i]) * 100}%` }} /></div>
-            <div className="val">{job.score[i]}/{MAX[i]}</div>
-            <div className="why">{job.why[i]}</div>
+          <div className="bd-row" key={label}>
+            <div className="bd-line"><span>{label}</span><span className="mono-label">{job.score[i]}/{MAX[i]}</span></div>
+            <div className="bd-track"><div style={{ width: `${(job.score[i] / MAX[i]) * 100}%` }} /></div>
+            <div className="bd-why">{job.why[i]}</div>
           </div>
         ))}
       </div>
-      <div className="mono-label" style={{ textTransform: "none", letterSpacing: 0 }}>Parts sum to {score}. Added up in code, not by the model.</div>
+      <div className="mono-label" style={{ textTransform: "none", letterSpacing: 0 }}>
+        Parts sum to {score}. Added up in code, not by the model. Opportunity {Math.round(0.65 * score + 0.35 * job.person.score)} = 0.65 × {score} fit + 0.35 × {job.person.score} reach.
+      </div>
     </div>
   );
 
@@ -343,7 +346,7 @@ export function Demo({
             <div className="demo-pane">
               {showSelected && (
                 <div className="picked">
-                  <span className={"score" + (score >= 80 ? " hi" : "")}>{score}</span>
+                  <Ring score={score} size={40} />
                   <span className="meta">
                     <div className="t">{job.title}</div>
                     <div className="s">{job.company} · {job.where}</div>
@@ -376,7 +379,7 @@ export function Demo({
             <div className="demo-pane">
               {showSelected && (
                 <div className="picked">
-                  <span className={"score" + (score >= 80 ? " hi" : "")}>{score}</span>
+                  <Ring score={score} size={40} />
                   <span className="meta">
                     <div className="t">{job.title}</div>
                     <div className="s">To {person.name} · {job.company}</div>

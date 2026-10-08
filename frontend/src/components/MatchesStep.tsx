@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { JobDetail, JobSummary, JobView, Signal } from "../types";
 import { Spinner } from "./Logo";
+import { Ring, TONE_LABEL, tone } from "./Score";
 import { message, type Ctx } from "./ctx";
 
 const SIGNALS = [
@@ -36,21 +37,6 @@ function ago(value: string): string {
   if (days < 31) return `${days}d ago`;
   if (days < 365) return `${Math.floor(days / 30)}mo ago`;
   return `${Math.floor(days / 365)}y ago`;
-}
-
-const tone = (score: number) => (score >= 80 ? "strong" : score >= 65 ? "good" : "weak");
-const TONE_LABEL = { strong: "Strong", good: "Good", weak: "Stretch" } as const;
-
-function Ring({ score, size = 52 }: { score: number; size?: number }) {
-  const r = size / 2 - 4;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg className={"mring " + tone(score)} width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`Fit score ${score} out of 100`}>
-      <circle cx={size / 2} cy={size / 2} r={r} className="bg" />
-      <circle cx={size / 2} cy={size / 2} r={r} className="fg" strokeDasharray={`${(c * score) / 100} ${c}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle">{score}</text>
-    </svg>
-  );
 }
 
 /** Strengths are the signals that scored well, gaps the ones that did not; the sentences are the scorer's own reasons. */
